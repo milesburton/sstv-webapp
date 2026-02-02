@@ -154,12 +154,12 @@ export class SSTVDecoder {
 
       if (pos >= samples.length) break;
 
-      const freq = this.detectFrequency(samples, pos, this.mode.scanTime / this.mode.width);
+      // Use a wider frequency sweep for more accuracy
+      const freq = this.detectFrequencyRange(samples, pos, this.mode.scanTime / this.mode.width);
 
-      // Map frequency to pixel value
-      const value = Math.max(0, Math.min(255,
-        ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255
-      ));
+      // Map frequency to pixel value with clamping
+      let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
+      value = Math.max(0, Math.min(255, Math.round(value)));
 
       const idx = (y * this.mode.width + x) * 4;
       imageData.data[idx + channel] = value;
@@ -167,6 +167,41 @@ export class SSTVDecoder {
     }
 
     return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
+  }
+
+  // Detect frequency across the full SSTV range
+  detectFrequencyRange(samples, startIdx, duration) {
+    const numSamples = Math.floor(duration * this.sampleRate);
+    const endIdx = Math.min(startIdx + numSamples, samples.length);
+
+    if (endIdx - startIdx < 10) return FREQ_BLACK;
+
+    // Sweep through the SSTV frequency range in steps
+    let maxMag = 0;
+    let detectedFreq = FREQ_BLACK;
+
+    // Coarse sweep first (every 100 Hz)
+    for (let freq = FREQ_BLACK - 200; freq <= FREQ_WHITE + 200; freq += 100) {
+      const magnitude = this.goertzel(samples, startIdx, endIdx, freq);
+      if (magnitude > maxMag) {
+        maxMag = magnitude;
+        detectedFreq = freq;
+      }
+    }
+
+    // Fine sweep around the detected frequency (every 20 Hz)
+    const fineStart = Math.max(FREQ_BLACK - 200, detectedFreq - 100);
+    const fineEnd = Math.min(FREQ_WHITE + 200, detectedFreq + 100);
+
+    for (let freq = fineStart; freq <= fineEnd; freq += 20) {
+      const magnitude = this.goertzel(samples, startIdx, endIdx, freq);
+      if (magnitude > maxMag) {
+        maxMag = magnitude;
+        detectedFreq = freq;
+      }
+    }
+
+    return detectedFreq;
   }
 
   decodeScanLineY(samples, startPos, imageData, y) {
@@ -177,12 +212,11 @@ export class SSTVDecoder {
 
       if (pos >= samples.length) break;
 
-      const freq = this.detectFrequency(samples, pos, this.mode.scanTime / this.mode.width);
+      const freq = this.detectFrequencyRange(samples, pos, this.mode.scanTime / this.mode.width);
 
       // Map frequency to luminance
-      const Y = Math.max(0, Math.min(255,
-        ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255
-      ));
+      let Y = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
+      Y = Math.max(0, Math.min(255, Math.round(Y)));
 
       // For now, use Y for all RGB channels (grayscale)
       // Full color Robot decoding would need separate Y, R-Y, B-Y scans
