@@ -64,12 +64,22 @@ npm install
 # Run development server
 npm run dev
 
+# Run tests (requires Node 20+)
+npm test
+
 # Build for production
 npm run build
 
 # Preview production build
 npm run preview
 ```
+
+## Testing
+
+Comprehensive test suite with unit and integration tests for encoder/decoder validation.
+See [TESTING.md](TESTING.md) for details.
+
+**Note:** Tests require Node.js 20+ (Vitest requirement). Current deployment uses build without tests.
 
 ## Deployment
 
