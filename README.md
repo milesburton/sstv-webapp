@@ -6,6 +6,7 @@ A web-based SSTV (Slow Scan Television) encoder and decoder built with React. Co
 
 ### Encoding (Image → Audio)
 - Drag & drop image files or use file picker
+- **Built-in example images** - Test pattern and sample graphics
 - Support for multiple SSTV modes:
   - Robot 36 (320x240)
   - Martin M1 (320x256)
@@ -18,6 +19,11 @@ A web-based SSTV (Slow Scan Television) encoder and decoder built with React. Co
 - Automatic SSTV mode detection via VIS code
 - Decodes image from SSTV signal
 - Download decoded images as PNG
+
+### Example Files
+- Click example images to instantly test encoding
+- SMPTE color bars test pattern
+- Sample gradient photo
 
 ## How It Works
 
