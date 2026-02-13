@@ -344,9 +344,10 @@ export class SSTVDecoder {
         freq = this.detectFrequencyRange(samples, pos, availableTime);
       }
 
-      // Map frequency to component value (0-255)
-      let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
-      value = Math.max(0, Math.min(255, Math.round(value)));
+      // Map frequency to Y value (video range: 16-235)
+      const normalized = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK);
+      let value = 16 + normalized * (235 - 16);
+      value = Math.max(16, Math.min(235, Math.round(value)));
 
       // Store Y directly in image data as grayscale (will be corrected later)
       const pixelIdx = (y * this.mode.width + x) * 4;
@@ -389,8 +390,8 @@ export class SSTVDecoder {
       let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       value = Math.max(0, Math.min(255, Math.round(value)));
 
-      // Denormalize from 0-255 to -156 to +156
-      const chromaValue = (value / 255) * 312 - 156;
+      // Store as-is (0-255), decoder will handle the video range offsets
+      const chromaValue = value;
 
       // Store chrominance for two pixels (expanding from half resolution)
       const idx1 = y * this.mode.width + x * 2;
@@ -436,10 +437,12 @@ export class SSTVDecoder {
           // Get Y (already stored in imageData as R component)
           const Y = imageData.data[idx];
 
-          // ITU-R BT.601 YUV to RGB conversion
-          let R = Y + 1.13983 * V;
-          let G = Y - 0.39465 * U - 0.5806 * V;
-          let B = Y + 2.03211 * U;
+          // ITU-R BT.601 YCbCr to RGB conversion (video range)
+          // Matching the C reference implementation
+          const yTerm = 298.082 * (Y - 16.0);
+          let R = 0.003906 * (yTerm + 408.583 * (V - 128));
+          let G = 0.003906 * (yTerm - 100.291 * (U - 128) - 208.12 * (V - 128));
+          let B = 0.003906 * (yTerm + 516.411 * (U - 128));
 
           // Clamp to valid range
           R = Math.max(0, Math.min(255, Math.round(R)));

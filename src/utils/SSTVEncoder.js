@@ -190,9 +190,13 @@ export class SSTVEncoder {
       const g = data[idx + 1];
       const b = data[idx + 2];
 
-      // ITU-R BT.601 Y calculation
-      const Y = 0.299 * r + 0.587 * g + 0.114 * b;
-      const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
+      // ITU-R BT.601 Y calculation (video range: 16-235)
+      const Y = 16 + (65.738 * r + 129.057 * g + 25.064 * b) / 256;
+      const clampedY = Math.max(16, Math.min(235, Math.round(Y)));
+
+      // Map Y (16-235) to frequency range
+      const normalized = (clampedY - 16) / (235 - 16);
+      const freq = FREQ_BLACK + normalized * (FREQ_WHITE - FREQ_BLACK);
 
       this.addTone(samples, freq, timePerYPixel);
     }
@@ -218,19 +222,21 @@ export class SSTVEncoder {
       const g = (data[idx1 + 1] + data[idx2 + 1]) / 2;
       const b = (data[idx1 + 2] + data[idx2 + 2]) / 2;
 
-      // ITU-R BT.601 chrominance calculation
-      const Y = 0.299 * r + 0.587 * g + 0.114 * b;
-      const U = 0.492 * (b - Y); // B-Y component
-      const V = 0.877 * (r - Y); // R-Y component
+      // Convert RGB to CbCr chrominance (ITU-R BT.601, video range)
+      // Cb/Cr: 16-240 (centered at 128)
+      const Cb = 128 + (-37.945 * r - 74.494 * g + 112.439 * b) / 256;
+      const Cr = 128 + (112.439 * r - 94.154 * g - 18.285 * b) / 256;
 
-      const chromaValue = isVLine ? V : U;
+      // Select U (Cb) or V (Cr) based on line
+      const chromaValue = isVLine ? Cr : Cb;
 
-      // Map chrominance to frequency range
-      // Chrominance ranges from approximately -111 to +111 for U, -156 to +156 for V
-      // Map to 0-255 range, then to frequency
-      const normalizedChroma = ((chromaValue + 156) / 312) * 255;
-      const clampedChroma = Math.max(0, Math.min(255, normalizedChroma));
-      const freq = FREQ_BLACK + (clampedChroma / 255) * (FREQ_WHITE - FREQ_BLACK);
+      // Clamp to video range (16-240)
+      const clampedChroma = Math.max(16, Math.min(240, Math.round(chromaValue)));
+
+      // Map 16-240 to frequency range 1500-2300 Hz
+      // This matches how the decoder expects it
+      const normalized = (clampedChroma - 16) / (240 - 16);
+      const freq = FREQ_BLACK + normalized * (FREQ_WHITE - FREQ_BLACK);
 
       this.addTone(samples, freq, timePerChromaPixel);
     }
