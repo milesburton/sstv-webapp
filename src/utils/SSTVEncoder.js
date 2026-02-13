@@ -184,6 +184,11 @@ export class SSTVEncoder {
       // Map Y to frequency
       const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
 
+      // Debug first few pixels
+      if (y < 3 && x < 5) {
+        console.log(`Encoder [${x},${y}]: RGB=(${r},${g},${b}) → Y=${Y.toFixed(0)} → freq=${freq.toFixed(0)}Hz`);
+      }
+
       this.addTone(samples, freq, timePerPixel);
     }
   }
