@@ -368,18 +368,20 @@ export class SSTVDecoder {
     const halfWidth = Math.floor(this.mode.width / 2);
     const samplesPerPixel = Math.floor((CHROMA_SCAN_TIME * this.sampleRate) / halfWidth);
 
-    // Use fixed 3ms window (144 samples at 48kHz) for better frequency resolution
-    // This gives ~5-6 cycles at 1900Hz for reliable Goertzel detection
-    const windowDuration = 0.003; // 3ms window
+    // Use 10ms overlapping window centered on each pixel position for better accuracy
+    // 10ms = 480 samples at 48kHz = ~19 cycles at 1900Hz
+    const windowDuration = 0.010;
     const windowSamples = Math.floor(windowDuration * this.sampleRate);
+    const halfWindow = Math.floor(windowSamples / 2);
 
     for (let x = 0; x < halfWidth; x++) {
-      const pos = startPos + x * samplesPerPixel;
+      const centerPos = startPos + x * samplesPerPixel;
+      const windowStart = Math.max(startPos, centerPos - halfWindow);
 
-      if (pos + windowSamples >= samples.length) break;
+      if (windowStart + windowSamples >= samples.length) break;
 
-      // Use fixed window for frequency detection
-      const freq = this.detectFrequencyRange(samples, pos, windowDuration);
+      // Use centered window for frequency detection
+      const freq = this.detectFrequencyRange(samples, windowStart, windowDuration);
 
       // Map frequency to component value (video range: 16-240)
       const normalized = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK);
