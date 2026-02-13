@@ -119,11 +119,12 @@ export class SSTVDecoder {
     }
 
     // For YUV modes, we need temporary storage for chrominance
+    // Initialize to 128 (neutral gray) instead of 0 to prevent green tint if decoding fails
     let chromaU = null;
     let chromaV = null;
     if (this.mode.colorFormat === 'YUV') {
-      chromaU = new Array(this.mode.width * this.mode.lines).fill(0);
-      chromaV = new Array(this.mode.width * this.mode.lines).fill(0);
+      chromaU = new Array(this.mode.width * this.mode.lines).fill(128);
+      chromaV = new Array(this.mode.width * this.mode.lines).fill(128);
     }
 
     // Find first sync pulse to align - search from multiple positions
@@ -430,6 +431,11 @@ export class SSTVDecoder {
 
         const V = chromaV[evenChromaIdx] || 128; // V from even line (default to neutral 128, not 0!)
         const U = chromaU[oddChromaIdx] || 128; // U from odd line (default to neutral 128, not 0!)
+
+        // Debug first few pixels
+        if (y === 0 && x < 5) {
+          console.log(`Pixel[${y},${x}] U=${U} V=${V}`);
+        }
 
         // Apply to both lines in the pair
         for (let ly = evenLine; ly <= oddLine && ly < this.mode.lines; ly++) {
