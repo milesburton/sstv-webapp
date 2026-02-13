@@ -11,6 +11,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
+    "spec": "vitest",
+    "spec:run": "vitest run",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },
