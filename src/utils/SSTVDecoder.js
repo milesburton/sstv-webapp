@@ -34,6 +34,10 @@ export class SSTVDecoder {
       throw new Error('Could not detect SSTV mode. Try manually selecting a mode.');
     }
 
+    if (typeof window !== 'undefined') {
+      console.log('📡 SSTV Mode detected:', this.mode.name);
+    }
+
     // Decode image
     return this.decodeImage(samples);
   }
@@ -68,9 +72,11 @@ export class SSTVDecoder {
   decodeVIS(samples, startIdx) {
     let idx = startIdx + Math.floor(0.03 * this.sampleRate); // Skip start bit
     let visCode = 0;
+    const frequenciesDetected = [];
 
     for (let bit = 0; bit < 7; bit++) {
       const freq = this.detectFrequency(samples, idx, 0.03);
+      frequenciesDetected.push(freq);
       const bitValue = freq < 1200 ? 1 : 0; // 1100 Hz = 1, 1300 Hz = 0
 
       if (bitValue) {
@@ -78,6 +84,12 @@ export class SSTVDecoder {
       }
 
       idx += Math.floor(0.03 * this.sampleRate);
+    }
+
+    // Log VIS frequencies for debugging (only in development)
+    if (typeof window !== 'undefined') {
+      console.log('📡 VIS Frequencies detected:', frequenciesDetected);
+      console.log('📡 VIS Code decoded:', visCode, '(binary:', visCode.toString(2).padStart(7, '0'), ')');
     }
 
     return visCode;
@@ -98,6 +110,14 @@ export class SSTVDecoder {
       imageData.data[i + 1] = 0; // G
       imageData.data[i + 2] = 0; // B
       imageData.data[i + 3] = 255; // A - critical for visibility
+    }
+
+    // For YUV modes, we need temporary storage for chrominance
+    let chromaU = null;
+    let chromaV = null;
+    if (this.mode.colorFormat === 'YUV') {
+      chromaU = new Array(this.mode.width * this.mode.lines).fill(0);
+      chromaV = new Array(this.mode.width * this.mode.lines).fill(0);
     }
 
     // Find first sync pulse to align - search from multiple positions
@@ -146,8 +166,31 @@ export class SSTVDecoder {
         // Decode Red
         position = this.decodeScanLine(samples, position, imageData, y, 0);
       } else {
-        // Decode Y (luminance) for Robot modes
-        position = this.decodeScanLineY(samples, position, imageData, y);
+        // YUV mode (Robot): Even lines are Y, odd lines are chrominance
+        if (y % 2 === 0) {
+          // Even line: Y (luminance)
+          position = this.decodeScanLineYUV(samples, position, imageData, y, chromaU, chromaV, 'Y');
+
+          // Skip separator and detect which chroma follows
+          if (position < samples.length) {
+            const sepStart = position;
+            const sepDuration = 0.0015;
+            const sepFreq = this.detectFrequency(samples, sepStart, sepDuration);
+
+            // Separator frequency indicates which chroma is on next odd line
+            // 1500Hz (FREQ_BLACK) = U follows, 2300Hz (FREQ_WHITE) = V follows
+            const isUNext = Math.abs(sepFreq - FREQ_BLACK) < Math.abs(sepFreq - FREQ_WHITE);
+
+            // Store which chroma type this is for the next line
+            this.nextChromaType = isUNext ? 'U' : 'V';
+
+            position += Math.floor(sepDuration * this.sampleRate);
+          }
+        } else {
+          // Odd line: Chrominance (U or V)
+          const chromaType = this.nextChromaType || 'U';
+          position = this.decodeScanLineYUV(samples, position, imageData, y, chromaU, chromaV, chromaType);
+        }
       }
 
       // Find next sync pulse within a reasonable window (2x line duration)
@@ -163,11 +206,16 @@ export class SSTVDecoder {
         const expectedLinePosition = position + Math.floor(this.mode.scanTime * this.sampleRate * 0.5);
         if (expectedLinePosition < samples.length) {
           // Try to find sync in an expanded window
-          const expandedSync = this.findSyncPulse(samples, expectedLinePosition, 
+          const expandedSync = this.findSyncPulse(samples, expectedLinePosition,
             expectedLinePosition + Math.floor(maxLineDuration * this.sampleRate));
           position = expandedSync !== -1 ? expandedSync : expectedLinePosition;
         }
       }
+    }
+
+    // After decoding all lines, convert YUV to RGB if needed
+    if (this.mode.colorFormat === 'YUV') {
+      this.convertYUVtoRGB(imageData, chromaU, chromaV);
     }
 
     ctx.putImageData(imageData, 0, 0);
@@ -251,12 +299,10 @@ export class SSTVDecoder {
     return detectedFreq;
   }
 
-  decodeScanLineY(samples, startPos, imageData, y) {
+  decodeScanLineYUV(samples, startPos, imageData, y, chromaU, chromaV, componentType) {
     const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / this.mode.width);
 
     // Use multi-pixel window for better frequency resolution
-    // Single pixel (22 samples) has insufficient resolution for Goertzel
-    // Use 4-pixel window (88 samples) for 1.8ms analysis window
     const pixelGroupSize = 4;
     const groupSamples = samplesPerPixel * pixelGroupSize;
 
@@ -268,32 +314,70 @@ export class SSTVDecoder {
       // Use wider analysis window for better frequency discrimination
       let freq;
       if (pos + groupSamples <= samples.length) {
-        // Enough samples for multi-pixel analysis
         freq = this.detectFrequencyRange(
           samples,
           pos,
           (this.mode.scanTime / this.mode.width) * pixelGroupSize
         );
       } else {
-        // Fall back to shorter window at end of data
         const availableTime = (samples.length - pos) / this.sampleRate;
         freq = this.detectFrequencyRange(samples, pos, availableTime);
       }
 
-      // Map frequency to luminance
-      let Y = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
-      Y = Math.max(0, Math.min(255, Math.round(Y)));
+      // Map frequency to component value (0-255)
+      let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
+      value = Math.max(0, Math.min(255, Math.round(value)));
 
-      // For now, use Y for all RGB channels (grayscale)
-      // Full color Robot decoding would need separate Y, R-Y, B-Y scans
-      const idx = (y * this.mode.width + x) * 4;
-      imageData.data[idx] = Y; // R
-      imageData.data[idx + 1] = Y; // G
-      imageData.data[idx + 2] = Y; // B
-      imageData.data[idx + 3] = 255; // Alpha
+      const idx = y * this.mode.width + x;
+
+      if (componentType === 'Y') {
+        // Store Y directly in image data as grayscale (will be corrected later)
+        const pixelIdx = idx * 4;
+        imageData.data[pixelIdx] = value; // R
+        imageData.data[pixelIdx + 1] = value; // G
+        imageData.data[pixelIdx + 2] = value; // B
+        imageData.data[pixelIdx + 3] = 255; // Alpha
+      } else if (componentType === 'U') {
+        // Store U chrominance - denormalize from 0-255 to -156 to +156
+        chromaU[idx - this.mode.width] = (value / 255) * 312 - 156;
+      } else if (componentType === 'V') {
+        // Store V chrominance - denormalize from 0-255 to -156 to +156
+        chromaV[idx - this.mode.width] = (value / 255) * 312 - 156;
+      }
     }
 
     return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
+  }
+
+  convertYUVtoRGB(imageData, chromaU, chromaV) {
+    // Convert YUV to RGB using ITU-R BT.601 standard
+    for (let y = 0; y < this.mode.lines; y += 2) {
+      // Process pairs of lines (Y line and its chrominance)
+      for (let x = 0; x < this.mode.width; x++) {
+        const idx = (y * this.mode.width + x) * 4;
+        const chromaIdx = y * this.mode.width + x;
+
+        // Get Y (already stored in imageData as R component)
+        const Y = imageData.data[idx];
+        const U = chromaU[chromaIdx] || 0;
+        const V = chromaV[chromaIdx] || 0;
+
+        // ITU-R BT.601 YUV to RGB conversion
+        let R = Y + 1.13983 * V;
+        let G = Y - 0.39465 * U - 0.58060 * V;
+        let B = Y + 2.03211 * U;
+
+        // Clamp to valid range
+        R = Math.max(0, Math.min(255, Math.round(R)));
+        G = Math.max(0, Math.min(255, Math.round(G)));
+        B = Math.max(0, Math.min(255, Math.round(B)));
+
+        // Update pixel
+        imageData.data[idx] = R;
+        imageData.data[idx + 1] = G;
+        imageData.data[idx + 2] = B;
+      }
+    }
   }
 
   findSyncPulse(samples, startPos, endPos = samples.length) {

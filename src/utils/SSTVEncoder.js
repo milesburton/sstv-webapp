@@ -154,6 +154,16 @@ export class SSTVEncoder {
       } else {
         // YUV scan (Robot modes)
         this.addScanLineYUV(samples, data, width, y);
+
+        // Robot modes: Add separator pulse after Y scan (even lines)
+        // to indicate which chrominance component follows
+        if (y % 2 === 0) {
+          // After Y scan, separator indicates next chroma type
+          // Every 2 Y-lines: first uses 1500Hz (U follows), second uses 2300Hz (V follows)
+          const isUNext = Math.floor(y / 2) % 2 === 0;
+          const sepFreq = isUNext ? FREQ_BLACK : FREQ_WHITE;
+          this.addTone(samples, sepFreq, this.mode.separatorPulse || 0.0015);
+        }
       }
     }
   }
@@ -175,16 +185,51 @@ export class SSTVEncoder {
   addScanLineYUV(samples, data, width, y) {
     const timePerPixel = this.mode.scanTime / width;
 
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
+    // Robot modes: Even lines send Y, odd lines send chrominance
+    // Even line (Y - luminance)
+    if (y % 2 === 0) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
 
-      const Y = 0.299 * r + 0.587 * g + 0.114 * b;
-      const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
+        // ITU-R BT.601 Y calculation
+        const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+        const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
 
-      this.addTone(samples, freq, timePerPixel);
+        this.addTone(samples, freq, timePerPixel);
+      }
+    } else {
+      // Odd line (chrominance - alternating U and V)
+      // Get chrominance from the previous even line
+      const evenY = y - 1;
+
+      for (let x = 0; x < width; x++) {
+        const idx = (evenY * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+
+        // ITU-R BT.601 chrominance calculation
+        const Y = 0.299 * r + 0.587 * g + 0.114 * b;
+        const U = 0.492 * (b - Y); // B-Y component
+        const V = 0.877 * (r - Y); // R-Y component
+
+        // Alternate between U and V based on line number
+        // Every 2 odd lines: first is U, second is V
+        const isULine = Math.floor((y - 1) / 2) % 2 === 0;
+        const chromaValue = isULine ? U : V;
+
+        // Map chrominance to frequency range
+        // Chrominance ranges from approximately -111 to +111 for U, -156 to +156 for V
+        // Map to 0-255 range, then to frequency
+        const normalizedChroma = (chromaValue + 156) / 312 * 255;
+        const clampedChroma = Math.max(0, Math.min(255, normalizedChroma));
+        const freq = FREQ_BLACK + (clampedChroma / 255) * (FREQ_WHITE - FREQ_BLACK);
+
+        this.addTone(samples, freq, timePerPixel);
+      }
     }
   }
 
