@@ -173,10 +173,17 @@ export class SSTVEncoder {
   }
 
   addScanLineYUV(samples, data, width, y) {
-    const timePerPixel = this.mode.scanTime / width;
+    // Robot36 timing constants (from reference implementation)
+    const Y_SCAN_TIME = 0.088; // 88ms for Y scan
+    const SEPARATOR_TIME = 0.0045; // 4.5ms separator
+    const PORCH_TIME = 0.0015; // 1.5ms porch
+    const CHROMA_SCAN_TIME = 0.044; // 44ms for chrominance
 
-    // Robot modes: Each line contains Y (luminance) + separator + chrominance
-    // Step 1: Send Y (luminance) for full width
+    const timePerYPixel = Y_SCAN_TIME / width;
+    const timePerChromaPixel = CHROMA_SCAN_TIME / (width / 2);
+
+    // Robot modes: Each line contains Y (luminance) + separator + porch + chrominance
+    // Step 1: Send Y (luminance) for full width (88ms total)
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
       const r = data[idx];
@@ -187,19 +194,19 @@ export class SSTVEncoder {
       const Y = 0.299 * r + 0.587 * g + 0.114 * b;
       const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
 
-      this.addTone(samples, freq, timePerPixel);
+      this.addTone(samples, freq, timePerYPixel);
     }
 
-    // Step 2: Separator pulse - alternates between lines
-    // Odd lines: 1500Hz, Even lines: 2300Hz
-    const sepFreq = y % 2 === 0 ? FREQ_WHITE : FREQ_BLACK;
-    this.addTone(samples, sepFreq, 0.0015);
+    // Step 2: Separator pulse (4.5ms) - alternates between lines
+    // Even lines: 1500Hz (U follows), Odd lines: 2300Hz (V follows)
+    const sepFreq = y % 2 === 0 ? FREQ_BLACK : FREQ_WHITE;
+    this.addTone(samples, sepFreq, SEPARATOR_TIME);
 
-    // Step 3: Porch
-    this.addTone(samples, FREQ_BLACK, 0.0015);
+    // Step 3: Porch (1.5ms)
+    this.addTone(samples, FREQ_BLACK, PORCH_TIME);
 
-    // Step 4: Send chrominance at half horizontal resolution
-    // Lines alternate between U and V
+    // Step 4: Send chrominance at half horizontal resolution (44ms total)
+    // Even lines: U (B-Y), Odd lines: V (R-Y)
     const isULine = y % 2 === 0;
 
     for (let x = 0; x < width; x += 2) {
@@ -225,7 +232,7 @@ export class SSTVEncoder {
       const clampedChroma = Math.max(0, Math.min(255, normalizedChroma));
       const freq = FREQ_BLACK + (clampedChroma / 255) * (FREQ_WHITE - FREQ_BLACK);
 
-      this.addTone(samples, freq, timePerPixel * 2); // Double time since half resolution
+      this.addTone(samples, freq, timePerChromaPixel);
     }
   }
 

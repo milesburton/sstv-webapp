@@ -172,26 +172,28 @@ export class SSTVDecoder {
         // Decode Red
         position = this.decodeScanLine(samples, position, imageData, y, 0);
       } else {
-        // YUV mode (Robot): Each line has Y + separator + chrominance
-        // Step 1: Decode Y (luminance) for this line
+        // YUV mode (Robot): Each line has Y + separator + porch + chrominance
+        // Robot36 timing: Y=88ms, separator=4.5ms, porch=1.5ms, chroma=44ms
+
+        // Step 1: Decode Y (luminance) for this line (88ms)
         position = this.decodeScanLineYUV(samples, position, imageData, y);
 
-        // Step 2: Detect separator frequency to determine chroma type
+        // Step 2: Detect separator frequency to determine chroma type (4.5ms)
         if (position < samples.length) {
           const sepStart = position;
-          const sepDuration = 0.0015;
+          const sepDuration = 0.0045;
           const sepFreq = this.detectFrequency(samples, sepStart, sepDuration);
 
-          // Separator: Odd lines = 1500Hz (U), Even lines = 2300Hz (V)
+          // Separator: Even lines = 1500Hz (U), Odd lines = 2300Hz (V)
           const isULine = Math.abs(sepFreq - FREQ_BLACK) < Math.abs(sepFreq - FREQ_WHITE);
           this.currentChromaType = isULine ? 'U' : 'V';
 
           position += Math.floor(sepDuration * this.sampleRate);
 
-          // Step 3: Skip porch
+          // Step 3: Skip porch (1.5ms)
           position += Math.floor(0.0015 * this.sampleRate);
 
-          // Step 4: Decode chrominance at half resolution
+          // Step 4: Decode chrominance at half resolution (44ms)
           if (position < samples.length) {
             position = this.decodeScanLineChroma(
               samples,
@@ -316,7 +318,9 @@ export class SSTVDecoder {
   }
 
   decodeScanLineYUV(samples, startPos, imageData, y) {
-    const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / this.mode.width);
+    // Robot36: Y scan is 88ms for full width
+    const Y_SCAN_TIME = 0.088;
+    const samplesPerPixel = Math.floor((Y_SCAN_TIME * this.sampleRate) / this.mode.width);
 
     // Use multi-pixel window for better frequency resolution
     const pixelGroupSize = 4;
@@ -333,7 +337,7 @@ export class SSTVDecoder {
         freq = this.detectFrequencyRange(
           samples,
           pos,
-          (this.mode.scanTime / this.mode.width) * pixelGroupSize
+          (Y_SCAN_TIME / this.mode.width) * pixelGroupSize
         );
       } else {
         const availableTime = (samples.length - pos) / this.sampleRate;
@@ -352,13 +356,14 @@ export class SSTVDecoder {
       imageData.data[pixelIdx + 3] = 255; // Alpha
     }
 
-    return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
+    return startPos + Math.floor(Y_SCAN_TIME * this.sampleRate);
   }
 
   decodeScanLineChroma(samples, startPos, chromaU, chromaV, y, componentType) {
-    // Chrominance is at half horizontal resolution
+    // Robot36: Chrominance scan is 44ms at half horizontal resolution
+    const CHROMA_SCAN_TIME = 0.044;
     const halfWidth = Math.floor(this.mode.width / 2);
-    const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / halfWidth);
+    const samplesPerPixel = Math.floor((CHROMA_SCAN_TIME * this.sampleRate) / halfWidth);
 
     const pixelGroupSize = 4;
     const groupSamples = samplesPerPixel * pixelGroupSize;
@@ -373,7 +378,7 @@ export class SSTVDecoder {
         freq = this.detectFrequencyRange(
           samples,
           pos,
-          (this.mode.scanTime / halfWidth) * pixelGroupSize
+          (CHROMA_SCAN_TIME / halfWidth) * pixelGroupSize
         );
       } else {
         const availableTime = (samples.length - pos) / this.sampleRate;
@@ -404,7 +409,7 @@ export class SSTVDecoder {
       }
     }
 
-    return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
+    return startPos + Math.floor(CHROMA_SCAN_TIME * this.sampleRate);
   }
 
   convertYUVtoRGB(imageData, chromaU, chromaV) {
