@@ -352,7 +352,7 @@ function App() {
             View on GitHub
           </a>
           {' • '}
-          <span className="version">v1.0.1</span>
+          <span className="version">v1.0.2</span>
           {' • '}
           <span className="build-info">
             Build {new Date().toISOString().slice(0, 16).replace('T', ' ')}
