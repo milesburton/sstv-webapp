@@ -429,7 +429,7 @@ export class SSTVDecoder {
         const oddChromaIdx = oddLine * this.mode.width + x;
 
         const V = chromaV[evenChromaIdx] || 0; // V from even line
-        const U = chromaU[oddChromaIdx] || 0;  // U from odd line
+        const U = chromaU[oddChromaIdx] || 0; // U from odd line
 
         // Apply to both lines in the pair
         for (let ly = evenLine; ly <= oddLine && ly < this.mode.lines; ly++) {
