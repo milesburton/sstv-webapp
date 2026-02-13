@@ -7,7 +7,7 @@ const FREQ_BLACK = 1500;
 const FREQ_WHITE = 2300;
 
 export class SSTVDecoder {
-  constructor(sampleRate = 44100) {
+  constructor(sampleRate = 48000) {
     this.sampleRate = sampleRate;
     this.mode = null;
   }
@@ -24,9 +24,8 @@ export class SSTVDecoder {
     // Get audio samples
     const samples = audioBuffer.getChannelData(0);
     this.sampleRate = audioBuffer.sampleRate;
-    console.log(
-      `Decoder using sample rate: ${this.sampleRate} Hz (AudioContext: ${audioContext.sampleRate} Hz)`
-    );
+    // audioContext can be closed after decoding
+    audioContext.close();
 
     // Detect VIS code to determine mode
     this.mode = this.detectMode(samples);
@@ -44,7 +43,9 @@ export class SSTVDecoder {
     const searchSamples = Math.min(samples.length, this.sampleRate * 2);
 
     // Find VIS start bit (1900 Hz for ~30ms)
-    for (let i = 0; i < searchSamples - 1000; i++) {
+    // Step by ~1ms instead of every sample for performance
+    const step = Math.floor(this.sampleRate * 0.001);
+    for (let i = 0; i < searchSamples - 1000; i += step) {
       const freq = this.detectFrequency(samples, i, 0.03);
 
       if (Math.abs(freq - 1900) < 50) {
@@ -54,15 +55,12 @@ export class SSTVDecoder {
         // Find matching mode
         for (const [_key, mode] of Object.entries(SSTV_MODES)) {
           if (mode.visCode === visCode) {
-            console.log(`Detected SSTV mode: ${mode.name}`);
             return mode;
           }
         }
       }
     }
 
-    // Default to Robot 36 if not detected
-    console.log('Mode detection failed, defaulting to Robot 36');
     return SSTV_MODES.ROBOT36;
   }
 
@@ -108,15 +106,11 @@ export class SSTVDecoder {
     let position = this.findSyncPulse(samples, searchStart);
 
     if (position === -1) {
-      console.warn('Could not find first sync pulse, trying from beginning...');
       position = this.findSyncPulse(samples, 0);
       if (position === -1) {
         throw new Error('Could not find sync pulse. Make sure this is a valid SSTV transmission.');
       }
     }
-
-    console.log(`Starting decode at position ${position}, sample rate: ${this.sampleRate}`);
-    console.log(`Mode: ${this.mode.name}, dimensions: ${this.mode.width}x${this.mode.lines}`);
 
     // Decode each line
     for (let y = 0; y < this.mode.lines && position < samples.length; y++) {
@@ -147,16 +141,14 @@ export class SSTVDecoder {
         position = this.decodeScanLineY(samples, position, imageData, y);
       }
 
-      // Find next sync pulse
-      const nextSync = this.findSyncPulse(samples, position);
+      // Find next sync pulse within a reasonable window (2x line duration)
+      const maxLineDuration = (this.mode.syncPulse + this.mode.syncPorch + this.mode.scanTime * 3) * 2;
+      const searchLimit = position + Math.floor(maxLineDuration * this.sampleRate);
+      const nextSync = this.findSyncPulse(samples, position, searchLimit);
       if (nextSync !== -1) {
         position = nextSync;
       }
 
-      // Progress callback could go here
-      if (y % 10 === 0) {
-        console.log(`Decoding: ${Math.floor((y / this.mode.lines) * 100)}%`);
-      }
     }
 
     ctx.putImageData(imageData, 0, 0);
@@ -179,13 +171,6 @@ export class SSTVDecoder {
       let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       value = Math.max(0, Math.min(255, Math.round(value)));
 
-      // Debug logging for first few pixels
-      if (y < 3 && x < 5) {
-        console.log(
-          `RGB Pixel [${x},${y}] ch${channel}: freq=${freq.toFixed(0)}Hz → value=${value}`
-        );
-      }
-
       const idx = (y * this.mode.width + x) * 4;
       imageData.data[idx + channel] = value;
       imageData.data[idx + 3] = 255; // Alpha
@@ -206,7 +191,8 @@ export class SSTVDecoder {
     let detectedFreq = FREQ_BLACK;
 
     // Coarse sweep first (every 100 Hz)
-    for (let freq = FREQ_BLACK - 200; freq <= FREQ_WHITE + 200; freq += 100) {
+    // Start below FREQ_SYNC (1200) to correctly identify sync vs data
+    for (let freq = FREQ_SYNC - 100; freq <= FREQ_WHITE + 200; freq += 100) {
       const magnitude = this.goertzel(samples, startIdx, endIdx, freq);
       if (magnitude > maxMag) {
         maxMag = magnitude;
@@ -215,7 +201,7 @@ export class SSTVDecoder {
     }
 
     // Fine sweep around the detected frequency (every 20 Hz)
-    const fineStart = Math.max(FREQ_BLACK - 200, detectedFreq - 100);
+    const fineStart = Math.max(FREQ_SYNC - 100, detectedFreq - 100);
     const fineEnd = Math.min(FREQ_WHITE + 200, detectedFreq + 100);
 
     for (let freq = fineStart; freq <= fineEnd; freq += 20) {
@@ -243,11 +229,6 @@ export class SSTVDecoder {
       let Y = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       Y = Math.max(0, Math.min(255, Math.round(Y)));
 
-      // Debug logging for first few pixels
-      if (y < 3 && x < 5) {
-        console.log(`YUV Pixel [${x},${y}]: freq=${freq.toFixed(0)}Hz → Y=${Y}, pos=${pos}`);
-      }
-
       // For now, use Y for all RGB channels (grayscale)
       // Full color Robot decoding would need separate Y, R-Y, B-Y scans
       const idx = (y * this.mode.width + x) * 4;
@@ -260,15 +241,12 @@ export class SSTVDecoder {
     return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
   }
 
-  findSyncPulse(samples, startPos) {
+  findSyncPulse(samples, startPos, endPos = samples.length) {
     const syncDuration = Math.max(0.004, this.mode?.syncPulse || 0.005);
     const samplesPerCheck = Math.floor(this.sampleRate * 0.001); // Check every 1ms
+    const searchEnd = Math.min(endPos, samples.length - Math.floor(syncDuration * this.sampleRate));
 
-    for (
-      let i = startPos;
-      i < samples.length - Math.floor(syncDuration * this.sampleRate);
-      i += samplesPerCheck
-    ) {
+    for (let i = startPos; i < searchEnd; i += samplesPerCheck) {
       const freq = this.detectFrequency(samples, i, syncDuration);
 
       // More lenient sync detection - allow 100 Hz tolerance
@@ -356,7 +334,9 @@ export class SSTVDecoder {
   async decodeWithMode(audioFile, modeName) {
     this.mode = SSTV_MODES[modeName];
 
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 48000,
+    });
     const arrayBuffer = await audioFile.arrayBuffer();
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 

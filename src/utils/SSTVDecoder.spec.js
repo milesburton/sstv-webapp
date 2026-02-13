@@ -10,7 +10,7 @@ describe('SSTVDecoder', () => {
 
   describe('Initialization', () => {
     it('should initialize with default sample rate', () => {
-      expect(decoder.sampleRate).toBe(44100);
+      expect(decoder.sampleRate).toBe(48000);
     });
   });
 

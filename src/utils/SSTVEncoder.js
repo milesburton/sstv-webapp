@@ -50,7 +50,7 @@ export class SSTVEncoder {
   constructor(mode = 'ROBOT36', sampleRate = 48000) {
     this.mode = SSTV_MODES[mode];
     this.sampleRate = sampleRate;
-    console.log(`Encoder initialized: ${this.mode.name}, sample rate: ${this.sampleRate} Hz`);
+    this.phase = 0; // Continuous phase across tone boundaries
   }
 
   async encodeImage(imageFile) {
@@ -70,31 +70,25 @@ export class SSTVEncoder {
   loadImage(file) {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(img);
+      };
+      img.onerror = (err) => {
+        URL.revokeObjectURL(objectUrl);
+        reject(err);
+      };
+      img.src = objectUrl;
     });
   }
 
   generateAudio(imageData) {
-    console.log('🎵 generateAudio() called');
-    console.log(`  imageData dimensions: ${imageData.width}x${imageData.height}`);
-    console.log(`  imageData.data length: ${imageData.data.length} bytes`);
-    console.log(`  First 4 pixels RGBA: [${imageData.data.slice(0, 16).join(', ')}]`);
-
     const samples = [];
 
-    // Add VIS (Vertical Interval Signaling) code
-    console.log('🎵 Adding VIS code...');
     this.addVISCode(samples);
-    console.log(`  VIS code added, samples: ${samples.length}`);
-
-    // Add image data
-    console.log('🎵 Adding image data...');
     this.addImageData(samples, imageData);
-    console.log(`  Image data added, total samples: ${samples.length}`);
 
-    // Convert to WAV
     return this.createWAV(samples);
   }
 
@@ -131,15 +125,8 @@ export class SSTVEncoder {
 
   addImageData(samples, imageData) {
     const { data, width, height } = imageData;
-    console.log(
-      `🖼️  addImageData() called: ${width}x${height}, colorFormat=${this.mode.colorFormat}`
-    );
-    console.log(`  data array length: ${data.length}, expected: ${width * height * 4}`);
 
     for (let y = 0; y < height; y++) {
-      if (y === 0) {
-        console.log(`🖼️  Starting line 0...`);
-      }
       // Sync pulse
       this.addTone(samples, FREQ_SYNC, this.mode.syncPulse);
 
@@ -188,47 +175,30 @@ export class SSTVEncoder {
   addScanLineYUV(samples, data, width, y) {
     const timePerPixel = this.mode.scanTime / width;
 
-    if (y === 0) {
-      console.log(
-        `📺 addScanLineYUV() called for line ${y}, width=${width}, timePerPixel=${timePerPixel.toFixed(6)}s`
-      );
-    }
-
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
       const r = data[idx];
       const g = data[idx + 1];
       const b = data[idx + 2];
 
-      // Convert RGB to YUV
       const Y = 0.299 * r + 0.587 * g + 0.114 * b;
-
-      // Map Y to frequency
       const freq = FREQ_BLACK + (Y / 255) * (FREQ_WHITE - FREQ_BLACK);
 
-      // Debug first few pixels
-      if (y < 3 && x < 5) {
-        console.log(
-          `📺 Encoder [${x},${y}]: RGB=(${r},${g},${b}) → Y=${Y.toFixed(0)} → freq=${freq.toFixed(0)}Hz`
-        );
-      }
-
       this.addTone(samples, freq, timePerPixel);
-    }
-
-    if (y === 0) {
-      console.log(`📺 Completed line 0, samples now: ${samples.length}`);
     }
   }
 
   addTone(samples, frequency, duration) {
     const numSamples = Math.floor(duration * this.sampleRate);
+    const phaseIncrement = (2 * Math.PI * frequency) / this.sampleRate;
 
     for (let i = 0; i < numSamples; i++) {
-      const t = i / this.sampleRate;
-      const sample = Math.sin(2 * Math.PI * frequency * t);
-      samples.push(sample);
+      samples.push(Math.sin(this.phase));
+      this.phase += phaseIncrement;
     }
+
+    // Keep phase in [0, 2π) to avoid floating point drift
+    this.phase %= 2 * Math.PI;
   }
 
   createWAV(samples) {
