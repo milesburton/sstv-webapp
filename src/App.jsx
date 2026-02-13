@@ -339,6 +339,10 @@ function App() {
           <a href="https://github.com/milesburton/sstv-toolkit" target="_blank" rel="noopener noreferrer">
             View on GitHub
           </a>
+          {' • '}
+          <span className="version">v1.0.0</span>
+          {' • '}
+          <span className="build-info">Build {new Date().toISOString().split('T')[0]}</span>
         </p>
       </footer>
     </div>

@@ -367,6 +367,11 @@ footer a:hover {
   text-decoration: underline;
 }
 
+.version, .build-info {
+  opacity: 0.8;
+  font-size: 0.85rem;
+}
+
 /* Mobile responsiveness */
 @media (max-width: 768px) {
   .app {
