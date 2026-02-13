@@ -432,11 +432,6 @@ export class SSTVDecoder {
         const V = chromaV[evenChromaIdx] || 128; // V from even line (default to neutral 128, not 0!)
         const U = chromaU[oddChromaIdx] || 128; // U from odd line (default to neutral 128, not 0!)
 
-        // Debug first few pixels
-        if (y === 0 && x < 5) {
-          console.log(`Pixel[${y},${x}] U=${U} V=${V}`);
-        }
-
         // Apply to both lines in the pair
         for (let ly = evenLine; ly <= oddLine && ly < this.mode.lines; ly++) {
           const idx = (ly * this.mode.width + x) * 4;
