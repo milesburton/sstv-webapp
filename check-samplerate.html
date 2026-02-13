@@ -6,7 +6,7 @@
     <pre id="result"></pre>
 
     <script>
-        function check() {
+        function _check() {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             document.getElementById('result').textContent =
                 `Browser AudioContext default sample rate: ${ctx.sampleRate} Hz\n\n` +

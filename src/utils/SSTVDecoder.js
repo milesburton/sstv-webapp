@@ -89,7 +89,13 @@ export class SSTVDecoder {
     // Log VIS frequencies for debugging (only in development)
     if (typeof window !== 'undefined') {
       console.log('📡 VIS Frequencies detected:', frequenciesDetected);
-      console.log('📡 VIS Code decoded:', visCode, '(binary:', visCode.toString(2).padStart(7, '0'), ')');
+      console.log(
+        '📡 VIS Code decoded:',
+        visCode,
+        '(binary:',
+        visCode.toString(2).padStart(7, '0'),
+        ')'
+      );
     }
 
     return visCode;
@@ -124,9 +130,9 @@ export class SSTVDecoder {
     // Try starting from several positions to find the first real line sync
     const searchPositions = [
       Math.floor(0.61 * this.sampleRate), // Standard VIS duration
-      Math.floor(0.5 * this.sampleRate),  // Earlier position
-      Math.floor(0.8 * this.sampleRate),  // Later position
-      0                                     // From beginning if all else fails
+      Math.floor(0.5 * this.sampleRate), // Earlier position
+      Math.floor(0.8 * this.sampleRate), // Later position
+      0, // From beginning if all else fails
     ];
 
     let position = -1;
@@ -166,30 +172,36 @@ export class SSTVDecoder {
         // Decode Red
         position = this.decodeScanLine(samples, position, imageData, y, 0);
       } else {
-        // YUV mode (Robot): Even lines are Y, odd lines are chrominance
-        if (y % 2 === 0) {
-          // Even line: Y (luminance)
-          position = this.decodeScanLineYUV(samples, position, imageData, y, chromaU, chromaV, 'Y');
+        // YUV mode (Robot): Each line has Y + separator + chrominance
+        // Step 1: Decode Y (luminance) for this line
+        position = this.decodeScanLineYUV(samples, position, imageData, y);
 
-          // Skip separator and detect which chroma follows
+        // Step 2: Detect separator frequency to determine chroma type
+        if (position < samples.length) {
+          const sepStart = position;
+          const sepDuration = 0.0015;
+          const sepFreq = this.detectFrequency(samples, sepStart, sepDuration);
+
+          // Separator: Odd lines = 1500Hz (U), Even lines = 2300Hz (V)
+          const isULine = Math.abs(sepFreq - FREQ_BLACK) < Math.abs(sepFreq - FREQ_WHITE);
+          this.currentChromaType = isULine ? 'U' : 'V';
+
+          position += Math.floor(sepDuration * this.sampleRate);
+
+          // Step 3: Skip porch
+          position += Math.floor(0.0015 * this.sampleRate);
+
+          // Step 4: Decode chrominance at half resolution
           if (position < samples.length) {
-            const sepStart = position;
-            const sepDuration = 0.0015;
-            const sepFreq = this.detectFrequency(samples, sepStart, sepDuration);
-
-            // Separator frequency indicates which chroma is on next odd line
-            // 1500Hz (FREQ_BLACK) = U follows, 2300Hz (FREQ_WHITE) = V follows
-            const isUNext = Math.abs(sepFreq - FREQ_BLACK) < Math.abs(sepFreq - FREQ_WHITE);
-
-            // Store which chroma type this is for the next line
-            this.nextChromaType = isUNext ? 'U' : 'V';
-
-            position += Math.floor(sepDuration * this.sampleRate);
+            position = this.decodeScanLineChroma(
+              samples,
+              position,
+              chromaU,
+              chromaV,
+              y,
+              this.currentChromaType
+            );
           }
-        } else {
-          // Odd line: Chrominance (U or V)
-          const chromaType = this.nextChromaType || 'U';
-          position = this.decodeScanLineYUV(samples, position, imageData, y, chromaU, chromaV, chromaType);
         }
       }
 
@@ -203,11 +215,15 @@ export class SSTVDecoder {
       } else {
         // If sync not found, advance by expected line duration
         // This helps maintain alignment even if sync detection is weak
-        const expectedLinePosition = position + Math.floor(this.mode.scanTime * this.sampleRate * 0.5);
+        const expectedLinePosition =
+          position + Math.floor(this.mode.scanTime * this.sampleRate * 0.5);
         if (expectedLinePosition < samples.length) {
           // Try to find sync in an expanded window
-          const expandedSync = this.findSyncPulse(samples, expectedLinePosition,
-            expectedLinePosition + Math.floor(maxLineDuration * this.sampleRate));
+          const expandedSync = this.findSyncPulse(
+            samples,
+            expectedLinePosition,
+            expectedLinePosition + Math.floor(maxLineDuration * this.sampleRate)
+          );
           position = expandedSync !== -1 ? expandedSync : expectedLinePosition;
         }
       }
@@ -299,7 +315,7 @@ export class SSTVDecoder {
     return detectedFreq;
   }
 
-  decodeScanLineYUV(samples, startPos, imageData, y, chromaU, chromaV, componentType) {
+  decodeScanLineYUV(samples, startPos, imageData, y) {
     const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / this.mode.width);
 
     // Use multi-pixel window for better frequency resolution
@@ -328,21 +344,63 @@ export class SSTVDecoder {
       let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       value = Math.max(0, Math.min(255, Math.round(value)));
 
-      const idx = y * this.mode.width + x;
+      // Store Y directly in image data as grayscale (will be corrected later)
+      const pixelIdx = (y * this.mode.width + x) * 4;
+      imageData.data[pixelIdx] = value; // R
+      imageData.data[pixelIdx + 1] = value; // G
+      imageData.data[pixelIdx + 2] = value; // B
+      imageData.data[pixelIdx + 3] = 255; // Alpha
+    }
 
-      if (componentType === 'Y') {
-        // Store Y directly in image data as grayscale (will be corrected later)
-        const pixelIdx = idx * 4;
-        imageData.data[pixelIdx] = value; // R
-        imageData.data[pixelIdx + 1] = value; // G
-        imageData.data[pixelIdx + 2] = value; // B
-        imageData.data[pixelIdx + 3] = 255; // Alpha
-      } else if (componentType === 'U') {
-        // Store U chrominance - denormalize from 0-255 to -156 to +156
-        chromaU[idx - this.mode.width] = (value / 255) * 312 - 156;
+    return startPos + Math.floor(this.mode.scanTime * this.sampleRate);
+  }
+
+  decodeScanLineChroma(samples, startPos, chromaU, chromaV, y, componentType) {
+    // Chrominance is at half horizontal resolution
+    const halfWidth = Math.floor(this.mode.width / 2);
+    const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / halfWidth);
+
+    const pixelGroupSize = 4;
+    const groupSamples = samplesPerPixel * pixelGroupSize;
+
+    for (let x = 0; x < halfWidth; x++) {
+      const pos = startPos + x * samplesPerPixel;
+
+      if (pos >= samples.length) break;
+
+      let freq;
+      if (pos + groupSamples <= samples.length) {
+        freq = this.detectFrequencyRange(
+          samples,
+          pos,
+          (this.mode.scanTime / halfWidth) * pixelGroupSize
+        );
+      } else {
+        const availableTime = (samples.length - pos) / this.sampleRate;
+        freq = this.detectFrequencyRange(samples, pos, availableTime);
+      }
+
+      // Map frequency to component value (0-255)
+      let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
+      value = Math.max(0, Math.min(255, Math.round(value)));
+
+      // Denormalize from 0-255 to -156 to +156
+      const chromaValue = (value / 255) * 312 - 156;
+
+      // Store chrominance for two pixels (expanding from half resolution)
+      const idx1 = y * this.mode.width + x * 2;
+      const idx2 = y * this.mode.width + x * 2 + 1;
+
+      if (componentType === 'U') {
+        chromaU[idx1] = chromaValue;
+        if (idx2 < this.mode.width * this.mode.lines) {
+          chromaU[idx2] = chromaValue;
+        }
       } else if (componentType === 'V') {
-        // Store V chrominance - denormalize from 0-255 to -156 to +156
-        chromaV[idx - this.mode.width] = (value / 255) * 312 - 156;
+        chromaV[idx1] = chromaValue;
+        if (idx2 < this.mode.width * this.mode.lines) {
+          chromaV[idx2] = chromaValue;
+        }
       }
     }
 
@@ -351,20 +409,25 @@ export class SSTVDecoder {
 
   convertYUVtoRGB(imageData, chromaU, chromaV) {
     // Convert YUV to RGB using ITU-R BT.601 standard
-    for (let y = 0; y < this.mode.lines; y += 2) {
-      // Process pairs of lines (Y line and its chrominance)
+    // Process ALL lines (both even Y lines and odd lines)
+    for (let y = 0; y < this.mode.lines; y++) {
       for (let x = 0; x < this.mode.width; x++) {
         const idx = (y * this.mode.width + x) * 4;
-        const chromaIdx = y * this.mode.width + x;
 
         // Get Y (already stored in imageData as R component)
         const Y = imageData.data[idx];
+
+        // For chrominance, use the data from the previous even line
+        // Even lines (0,2,4...) and their corresponding odd lines (1,3,5...) share chrominance
+        const evenLineY = Math.floor(y / 2) * 2;
+        const chromaIdx = evenLineY * this.mode.width + x;
+
         const U = chromaU[chromaIdx] || 0;
         const V = chromaV[chromaIdx] || 0;
 
         // ITU-R BT.601 YUV to RGB conversion
         let R = Y + 1.13983 * V;
-        let G = Y - 0.39465 * U - 0.58060 * V;
+        let G = Y - 0.39465 * U - 0.5806 * V;
         let B = Y + 2.03211 * U;
 
         // Clamp to valid range
@@ -420,7 +483,9 @@ export class SSTVDecoder {
 
     // Use Goertzel algorithm for more accurate frequency detection
     // Test for common SSTV frequencies with extended range
-    const testFreqs = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300];
+    const testFreqs = [
+      1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300,
+    ];
     let maxMag = 0;
     let detectedFreq = 1500;
 
