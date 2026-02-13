@@ -170,6 +170,11 @@ export class SSTVDecoder {
       let value = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       value = Math.max(0, Math.min(255, Math.round(value)));
 
+      // Debug logging for first few pixels
+      if (y < 3 && x < 5) {
+        console.log(`RGB Pixel [${x},${y}] ch${channel}: freq=${freq.toFixed(0)}Hz → value=${value}`);
+      }
+
       const idx = (y * this.mode.width + x) * 4;
       imageData.data[idx + channel] = value;
       imageData.data[idx + 3] = 255; // Alpha
@@ -226,6 +231,11 @@ export class SSTVDecoder {
       // Map frequency to luminance
       let Y = ((freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK)) * 255;
       Y = Math.max(0, Math.min(255, Math.round(Y)));
+
+      // Debug logging for first few pixels
+      if (y < 3 && x < 5) {
+        console.log(`YUV Pixel [${x},${y}]: freq=${freq.toFixed(0)}Hz → Y=${Y}, pos=${pos}`);
+      }
 
       // For now, use Y for all RGB channels (grayscale)
       // Full color Robot decoding would need separate Y, R-Y, B-Y scans
