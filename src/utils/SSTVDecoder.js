@@ -142,13 +142,23 @@ export class SSTVDecoder {
       }
 
       // Find next sync pulse within a reasonable window (2x line duration)
-      const maxLineDuration = (this.mode.syncPulse + this.mode.syncPorch + this.mode.scanTime * 3) * 2;
+      const maxLineDuration =
+        (this.mode.syncPulse + this.mode.syncPorch + this.mode.scanTime * 3) * 2;
       const searchLimit = position + Math.floor(maxLineDuration * this.sampleRate);
       const nextSync = this.findSyncPulse(samples, position, searchLimit);
       if (nextSync !== -1) {
         position = nextSync;
+      } else {
+        // If sync not found, advance by expected line duration
+        // This helps maintain alignment even if sync detection is weak
+        const expectedLinePosition = position + Math.floor(this.mode.scanTime * this.sampleRate * 0.5);
+        if (expectedLinePosition < samples.length) {
+          // Try to find sync in an expanded window
+          const expandedSync = this.findSyncPulse(samples, expectedLinePosition, 
+            expectedLinePosition + Math.floor(maxLineDuration * this.sampleRate));
+          position = expandedSync !== -1 ? expandedSync : expectedLinePosition;
+        }
       }
-
     }
 
     ctx.putImageData(imageData, 0, 0);
@@ -171,9 +181,13 @@ export class SSTVDecoder {
 
       // Use wider analysis window for better frequency discrimination
       let freq;
-      if (pos + (pixelGroupSize * samplesPerPixel) <= samples.length) {
+      if (pos + pixelGroupSize * samplesPerPixel <= samples.length) {
         // Enough samples for multi-pixel analysis
-        freq = this.detectFrequencyRange(samples, pos, this.mode.scanTime / this.mode.width * pixelGroupSize);
+        freq = this.detectFrequencyRange(
+          samples,
+          pos,
+          (this.mode.scanTime / this.mode.width) * pixelGroupSize
+        );
       } else {
         // Fall back to shorter window at end of data
         const availableTime = (samples.length - pos) / this.sampleRate;
@@ -230,7 +244,7 @@ export class SSTVDecoder {
 
   decodeScanLineY(samples, startPos, imageData, y) {
     const samplesPerPixel = Math.floor((this.mode.scanTime * this.sampleRate) / this.mode.width);
-    
+
     // Use multi-pixel window for better frequency resolution
     // Single pixel (22 samples) has insufficient resolution for Goertzel
     // Use 4-pixel window (88 samples) for 1.8ms analysis window
@@ -246,7 +260,11 @@ export class SSTVDecoder {
       let freq;
       if (pos + groupSamples <= samples.length) {
         // Enough samples for multi-pixel analysis
-        freq = this.detectFrequencyRange(samples, pos, (this.mode.scanTime / this.mode.width) * pixelGroupSize);
+        freq = this.detectFrequencyRange(
+          samples,
+          pos,
+          (this.mode.scanTime / this.mode.width) * pixelGroupSize
+        );
       } else {
         // Fall back to shorter window at end of data
         const availableTime = (samples.length - pos) / this.sampleRate;
@@ -271,14 +289,14 @@ export class SSTVDecoder {
 
   findSyncPulse(samples, startPos, endPos = samples.length) {
     const syncDuration = Math.max(0.004, this.mode?.syncPulse || 0.005);
-    const samplesPerCheck = Math.floor(this.sampleRate * 0.001); // Check every 1ms
+    const samplesPerCheck = Math.floor(this.sampleRate * 0.0005); // Check every 0.5ms for better resolution
     const searchEnd = Math.min(endPos, samples.length - Math.floor(syncDuration * this.sampleRate));
 
     for (let i = startPos; i < searchEnd; i += samplesPerCheck) {
       const freq = this.detectFrequency(samples, i, syncDuration);
 
-      // More lenient sync detection - allow 100 Hz tolerance
-      if (Math.abs(freq - FREQ_SYNC) < 100) {
+      // More lenient sync detection - allow 150 Hz tolerance for real-world signals
+      if (Math.abs(freq - FREQ_SYNC) < 150) {
         // Verify it's actually a sync by checking duration
         let syncValid = true;
 
@@ -286,7 +304,7 @@ export class SSTVDecoder {
         for (let j = 0; j < 3; j++) {
           const checkPos = i + Math.floor((syncDuration * this.sampleRate * j) / 3);
           const checkFreq = this.detectFrequency(samples, checkPos, syncDuration / 3);
-          if (Math.abs(checkFreq - FREQ_SYNC) > 150) {
+          if (Math.abs(checkFreq - FREQ_SYNC) > 200) {
             syncValid = false;
             break;
           }
@@ -308,8 +326,8 @@ export class SSTVDecoder {
     if (endIdx - startIdx < 10) return 0;
 
     // Use Goertzel algorithm for more accurate frequency detection
-    // Test for common SSTV frequencies
-    const testFreqs = [1200, 1500, 1900, 2300];
+    // Test for common SSTV frequencies with extended range
+    const testFreqs = [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300];
     let maxMag = 0;
     let detectedFreq = 1500;
 
@@ -322,9 +340,9 @@ export class SSTVDecoder {
     }
 
     // If we have a strong signal, interpolate for more accuracy
-    if (maxMag > 0.1) {
-      // Fine-tune around the detected frequency
-      const step = 50;
+    if (maxMag > 0.05) {
+      // Fine-tune around the detected frequency with wider range for noisy signals
+      const step = 100;
       for (let f = detectedFreq - step; f <= detectedFreq + step; f += 10) {
         const magnitude = this.goertzel(samples, startIdx, endIdx, f);
         if (magnitude > maxMag) {

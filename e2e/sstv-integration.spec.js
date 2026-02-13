@@ -103,7 +103,9 @@ test.describe('SSTV Encode → Decode Integration', () => {
     await expect(page.locator('h1')).toContainText('SSTV Toolkit');
   });
 
-  test('should encode and decode a black/white test pattern with visible pixels', async ({ page }) => {
+  test('should encode and decode a black/white test pattern with visible pixels', async ({
+    page,
+  }) => {
     // Create a high-contrast test image: left half black, right half white
     const canvas = createCanvas(320, 240);
     const ctx = canvas.getContext('2d');
