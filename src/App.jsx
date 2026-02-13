@@ -255,6 +255,12 @@ function App() {
             <p>SSTV Audio → Image</p>
           </div>
 
+          <div className="mode-options">
+            <p className="auto-detect-note">
+              🔍 Automatic mode detection via VIS code
+            </p>
+          </div>
+
           <section
             className={`drop-zone ${decodeDragActive ? 'active' : ''} ${decodeProcessing ? 'processing' : ''}`}
             onDragEnter={handleDecodeDrag}

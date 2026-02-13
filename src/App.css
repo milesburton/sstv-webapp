@@ -132,6 +132,13 @@ main.side-by-side {
   border-color: #667eea;
 }
 
+.auto-detect-note {
+  font-size: 0.9rem;
+  color: #667eea;
+  font-weight: 500;
+  padding: 0.5rem;
+}
+
 /* Drop zone */
 .drop-zone {
   border: 3px dashed #ddd;

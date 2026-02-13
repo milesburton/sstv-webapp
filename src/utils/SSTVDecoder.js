@@ -95,7 +95,8 @@ export class SSTVDecoder {
     }
 
     // Find first sync pulse to align - skip VIS code area
-    const visCodeDuration = 0.5; // VIS code is about 500ms
+    // VIS code: leader(300ms) + break(10ms) + start(30ms) + 8bits(240ms) + stop(30ms) = ~610ms
+    const visCodeDuration = 0.7; // Skip past VIS code with margin
     const searchStart = Math.floor(visCodeDuration * this.sampleRate);
     let position = this.findSyncPulse(samples, searchStart);
 
