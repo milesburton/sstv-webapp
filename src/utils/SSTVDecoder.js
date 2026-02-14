@@ -1,6 +1,6 @@
 // SSTV Decoder - Converts SSTV audio signals to images
 
-import { SSTV_MODES } from './SSTVEncoder';
+import { SSTV_MODES } from './SSTVEncoder.js';
 
 const FREQ_SYNC = 1200;
 const FREQ_BLACK = 1500;
@@ -179,22 +179,15 @@ export class SSTVDecoder {
         // Step 1: Decode Y (luminance) for this line (88ms)
         position = this.decodeScanLineYUV(samples, position, imageData, y);
 
-        // Step 2: Detect separator frequency to determine chroma type (4.5ms)
+        // Step 2: Skip separator and determine chroma type (4.5ms)
         if (position < samples.length) {
-          const sepStart = position;
           const sepDuration = 0.0045;
-          const sepFreq = this.detectFrequency(samples, sepStart, sepDuration);
 
+          // Use line number to determine chroma type
           // Separator: Even lines = 1500Hz (V/R-Y), Odd lines = 2300Hz (U/B-Y)
-          // CRITICAL FIX: Use line number as primary determinant
-          // Separator frequency is unreliable in real-world signals
+          // Note: Separator frequency is unreliable in real-world signals
           const isEvenLine = y % 2 === 0;
           this.currentChromaType = isEvenLine ? 'V' : 'U';
-
-          // Debug: log separator detection accuracy for first 10 lines
-          if (y < 10) {
-            console.log(`Line ${y}: Sep=${Math.round(sepFreq)}Hz, Type=${this.currentChromaType}, Expected=${isEvenLine ? 'V' : 'U'} ✅`);
-          }
 
           position += Math.floor(sepDuration * this.sampleRate);
 
@@ -376,20 +369,25 @@ export class SSTVDecoder {
     const samplesPerPixel = Math.floor((CHROMA_SCAN_TIME * this.sampleRate) / halfWidth);
 
     // Chroma scan is 44ms for 160 pixels = 0.275ms per pixel
-    // Reference implementation (Python SSTV) uses WINDOW_FACTOR = 7.70
-    // window = pixel_time * 7.70 = 0.000275 * 7.70 = 0.002117s = 2.1ms
-    // This gives ~4 cycles at 1900Hz which is sufficient for FFT/Goertzel
-    const windowDuration = 0.00211; // 2.1ms window (matches reference)
+    // Reference implementation uses WINDOW_FACTOR = 0.98 for Robot modes
+    // window = pixel_time * 0.98 = 0.000275 * 0.98 = 0.0002695s ≈ 0.27ms
+    const pixelTime = CHROMA_SCAN_TIME / halfWidth;
+    const windowDuration = pixelTime * 0.98;
     const windowSamples = Math.floor(windowDuration * this.sampleRate);
 
     for (let x = 0; x < halfWidth; x++) {
       const pixelPos = startPos + x * samplesPerPixel;
 
-      // Make sure we have enough samples for the window
-      if (pixelPos + windowSamples >= samples.length) break;
+      // Center the window on the MIDDLE of the pixel, not the start
+      const pixelCenter = pixelPos + Math.floor(samplesPerPixel / 2);
+      const windowStart = Math.max(0, Math.floor(pixelCenter - windowSamples / 2));
+      const windowEnd = windowStart + windowSamples;
 
-      // Detect frequency at this pixel position
-      const freq = this.detectFrequencyRange(samples, pixelPos, windowDuration);
+      // Make sure we have enough samples for the window
+      if (windowEnd >= samples.length) break;
+
+      // Detect frequency at this pixel position (using centered window)
+      const freq = this.detectFrequencyRange(samples, windowStart, windowDuration);
 
       // Map frequency to component value (video range: 16-240)
       const normalized = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK);
@@ -402,11 +400,6 @@ export class SSTVDecoder {
       const idx1 = y * this.mode.width + x * 2;
       const idx2 = y * this.mode.width + x * 2 + 1;
 
-      // Debug: log first few chroma values of first TWO lines
-      if (y <= 1 && x < 5) {
-        console.log(`STORE: Line ${y}, x=${x}: freq=${Math.round(freq)}Hz → ${componentType}=${chromaValue} at idx ${idx1},${idx2}`);
-      }
-
       if (componentType === 'U') {
         chromaU[idx1] = chromaValue;
         if (idx2 < this.mode.width * this.mode.lines) {
@@ -416,15 +409,6 @@ export class SSTVDecoder {
         chromaV[idx1] = chromaValue;
         if (idx2 < this.mode.width * this.mode.lines) {
           chromaV[idx2] = chromaValue;
-        }
-      }
-
-      // Debug: verify what was stored
-      if (y <= 1 && x < 5) {
-        if (componentType === 'U') {
-          console.log(`  Stored chromaU[${idx1}]=${chromaU[idx1]}, chromaU[${idx2}]=${chromaU[idx2]}`);
-        } else {
-          console.log(`  Stored chromaV[${idx1}]=${chromaV[idx1]}, chromaV[${idx2}]=${chromaV[idx2]}`);
         }
       }
     }
@@ -442,19 +426,14 @@ export class SSTVDecoder {
       const oddLine = Math.min(y + 1, this.mode.lines - 1);
 
       for (let x = 0; x < this.mode.width; x++) {
-        // Get chrominance values from the line pair
+        // CRITICAL FIX: Chroma is stored at x*2 indices (half resolution expanded to full)
+        // When we stored chroma for pixel x, we put it at indices x*2 and x*2+1
+        // So when retrieving for pixel x, we need to read from index x (which maps to x/2 chroma pixel)
         const evenChromaIdx = evenLine * this.mode.width + x;
         const oddChromaIdx = oddLine * this.mode.width + x;
 
         const V = chromaV[evenChromaIdx] || 128; // V from even line (default to neutral 128, not 0!)
         const U = chromaU[oddChromaIdx] || 128; // U from odd line (default to neutral 128, not 0!)
-
-        // Debug: log first few pixels of first line pair with detailed indices
-        if (y === 0 && x < 5) {
-          console.log(`RETRIEVE: LineP ${y}, x=${x}: evenIdx=${evenChromaIdx}, oddIdx=${oddChromaIdx}`);
-          console.log(`  chromaV[${evenChromaIdx}]=${chromaV[evenChromaIdx]}, chromaU[${oddChromaIdx}]=${chromaU[oddChromaIdx]}`);
-          console.log(`  Using: U=${U}, V=${V}`);
-        }
 
         // Apply to both lines in the pair
         for (let ly = evenLine; ly <= oddLine && ly < this.mode.lines; ly++) {
@@ -557,7 +536,9 @@ export class SSTVDecoder {
   // Goertzel algorithm for single-frequency DFT
   goertzel(samples, startIdx, endIdx, targetFreq) {
     const N = endIdx - startIdx;
-    const k = Math.round((N * targetFreq) / this.sampleRate);
+    // Use exact frequency, not rounded to nearest bin
+    // This allows fractional bins for better accuracy
+    const k = (N * targetFreq) / this.sampleRate;
     const omega = (2 * Math.PI * k) / N;
     const coeff = 2 * Math.cos(omega);
 
