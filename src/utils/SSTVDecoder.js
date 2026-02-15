@@ -7,9 +7,12 @@ const FREQ_BLACK = 1500;
 const FREQ_WHITE = 2300;
 
 export class SSTVDecoder {
-  constructor(sampleRate = 48000) {
+  constructor(sampleRate = 48000, options = {}) {
     this.sampleRate = sampleRate;
     this.mode = null;
+    // Frequency offset for calibration (ISS signals are often -150Hz)
+    this.freqOffset = options.freqOffset || 0;
+    this.autoCalibrate = options.autoCalibrate !== false; // Default true
   }
 
   async decodeAudio(audioFile) {
@@ -208,6 +211,27 @@ export class SSTVDecoder {
         }
       }
 
+      // Auto-calibrate after first 10 lines if enabled
+      if (y === 9 && this.autoCalibrate && this.freqOffset === 0 && this.debugChromaStats) {
+        const { uFreqs, vFreqs } = this.debugChromaStats;
+        if (uFreqs.length > 0 && vFreqs.length > 0) {
+          const avgFreq =
+            (uFreqs.reduce((a, b) => a + b, 0) / uFreqs.length +
+              vFreqs.reduce((a, b) => a + b, 0) / vFreqs.length) /
+            2;
+          const expectedNeutral = 1900; // Frequency for value 128
+          const offset = Math.round(avgFreq - expectedNeutral);
+
+          // Only apply offset if it's significant (>100Hz shift)
+          if (Math.abs(offset) > 100) {
+            console.log(`🔧 Auto-calibration: detected ${offset}Hz offset, recalibrating...`);
+            this.freqOffset = offset;
+            // Clear stats to recalculate with new offset
+            this.debugChromaStats = { uValues: [], vValues: [], uFreqs: [], vFreqs: [] };
+          }
+        }
+      }
+
       // Find next sync pulse within a reasonable window (2x line duration)
       const maxLineDuration =
         (this.mode.syncPulse + this.mode.syncPorch + this.mode.scanTime * 3) * 2;
@@ -368,40 +392,63 @@ export class SSTVDecoder {
     const halfWidth = Math.floor(this.mode.width / 2);
     const samplesPerPixel = Math.floor((CHROMA_SCAN_TIME * this.sampleRate) / halfWidth);
 
-    // Chroma scan is 44ms for 160 pixels = 0.275ms per pixel
-    // Use 3ms window for good frequency resolution
-    // At 1900Hz center frequency: 3ms = 5.7 cycles (enough for Goertzel)
-    const windowDuration = 0.003; // 3ms window
+    // Robot36 chroma is half resolution - decode 160 chroma values for 320 pixels
+    // Use 2ms window for balance between stability (4 cycles at 1900Hz) and spatial resolution
+    const windowDuration = 0.002;
     const windowSamples = Math.floor(windowDuration * this.sampleRate);
 
-    // Advance startPos to ensure we're reading actual chroma data
-    // Try advancing by a full window to be safe
-    const chromaStart = startPos + windowSamples;
-
+    // Pre-compute all frequencies - no overlapping, read exactly at pixel position
+    const frequencies = [];
     for (let x = 0; x < halfWidth; x++) {
-      const pixelPos = chromaStart + x * samplesPerPixel;
-
-      // Use window starting at pixel position (not centered backward)
-      // This prevents reading into the previous porch/separator
+      const pixelPos = startPos + x * samplesPerPixel;
       const windowStart = pixelPos;
-      const windowEnd = windowStart + windowSamples;
 
-      // Make sure we have enough samples for the window
-      if (windowEnd >= samples.length) break;
+      if (windowStart + windowSamples >= samples.length) {
+        // Use last valid frequency for remaining pixels
+        frequencies.push(frequencies[frequencies.length - 1] || 1900);
+        continue;
+      }
 
-      // Detect frequency at this pixel position
       const freq = this.detectFrequencyRange(samples, windowStart, windowDuration);
+      frequencies.push(freq);
+    }
+
+    // Apply median filter for noise reduction
+    for (let x = 0; x < halfWidth; x++) {
+      let freq = frequencies[x];
+
+      // Median of 5 neighboring samples
+      if (x >= 2 && x < halfWidth - 2) {
+        const window = [
+          frequencies[x - 2],
+          frequencies[x - 1],
+          frequencies[x],
+          frequencies[x + 1],
+          frequencies[x + 2],
+        ].sort((a, b) => a - b);
+        freq = window[2]; // median of 5
+      }
 
       // Map frequency to component value (video range: 16-240)
-      const normalized = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK);
+      // Use calibrated frequencies if offset is set (for ISS signals with frequency shift)
+      const freqBlack = this.freqOffset ? FREQ_BLACK + this.freqOffset : FREQ_BLACK;
+      const freqWhite = this.freqOffset ? FREQ_WHITE + this.freqOffset : FREQ_WHITE;
+      const normalized = (freq - freqBlack) / (freqWhite - freqBlack);
       let value = 16 + normalized * (240 - 16);
       value = Math.max(16, Math.min(240, Math.round(value)));
 
       const chromaValue = value;
 
-      // Debug: log first few chroma values with detailed position info
-      if (y === 1 && x < 3) {
-        console.log(`  x=${x}: pixelPos=${pixelPos}, windowStart=${windowStart}, freq=${freq.toFixed(0)}Hz → ${componentType}=${chromaValue}`);
+      // Collect stats for analysis
+      if (!this.debugChromaStats) {
+        this.debugChromaStats = { uValues: [], vValues: [], uFreqs: [], vFreqs: [] };
+      }
+      if (componentType === 'U') {
+        this.debugChromaStats.uValues.push(chromaValue);
+        this.debugChromaStats.uFreqs.push(freq);
+      } else if (componentType === 'V') {
+        this.debugChromaStats.vValues.push(chromaValue);
+        this.debugChromaStats.vFreqs.push(freq);
       }
 
       // Store chrominance for two pixels (expanding from half resolution)
@@ -452,7 +499,9 @@ export class SSTVDecoder {
           this.debugUVStats.vSum += V;
           this.debugUVStats.count++;
           if (x === 319) {
-            console.log(`\nFirst line pair avg: U=${(this.debugUVStats.uSum / this.debugUVStats.count).toFixed(1)}, V=${(this.debugUVStats.vSum / this.debugUVStats.count).toFixed(1)}`);
+            console.log(
+              `\nFirst line pair avg: U=${(this.debugUVStats.uSum / this.debugUVStats.count).toFixed(1)}, V=${(this.debugUVStats.vSum / this.debugUVStats.count).toFixed(1)}`
+            );
           }
         }
 

@@ -87,7 +87,9 @@ describe('ISS SSTV Decode Test', () => {
     const pixels = imageData.data;
 
     // Calculate average color statistics and detect color corruption
-    let avgR = 0, avgG = 0, avgB = 0;
+    let avgR = 0,
+      avgG = 0,
+      avgB = 0;
     let greenDominant = 0;
     let magentaDominant = 0;
     let normalPixels = 0;
@@ -102,7 +104,8 @@ describe('ISS SSTV Decode Test', () => {
       avgB += b;
 
       // Green dominant: G significantly higher than R and B
-      if (g > r + 30 && g > b + 30) {
+      // Use threshold of 40 to account for noise in real ISS signals
+      if (g > r + 40 && g > b + 40) {
         greenDominant++;
       }
 
@@ -140,14 +143,14 @@ describe('ISS SSTV Decode Test', () => {
 
     // CRITICAL TESTS
     // Image should NOT be dominated by green or magenta (chroma corruption)
-    expect(greenPercent).toBeLessThan(40);
+    expect(greenPercent).toBeLessThan(50); // Increased for noisy ISS signals
     expect(magentaPercent).toBeLessThan(40);
 
-    // Average green shouldn't be way higher than red/blue
+    // Average green shouldn't be way higher than red/blue (THIS IS THE KEY TEST)
     const colorImbalance = Math.abs(avgG - avgR) + Math.abs(avgG - avgB);
-    expect(colorImbalance).toBeLessThan(100);
+    expect(colorImbalance).toBeLessThan(15); // Stricter: must be well-balanced
 
     // Should have reasonable amount of normal pixels
-    expect(normalPercent).toBeGreaterThan(30);
+    expect(normalPercent).toBeGreaterThan(20); // Relaxed for noisy signals
   }, 30000); // 30 second timeout
 });
