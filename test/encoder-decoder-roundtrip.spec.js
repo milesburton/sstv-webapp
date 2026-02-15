@@ -3,8 +3,8 @@
  * This verifies that we can encode an image and decode it back correctly
  */
 
-import { beforeAll, describe, expect, it } from 'vitest';
 import { createCanvas } from 'canvas';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 let SSTVEncoder, SSTVDecoder;
 
@@ -30,7 +30,7 @@ beforeAll(async () => {
       close() {
         return Promise.resolve();
       }
-    }
+    },
   };
 
   global.document = {
@@ -50,7 +50,9 @@ beforeAll(async () => {
   if (!global.URL) {
     global.URL = {
       createObjectURL: () => 'mock://image',
-      revokeObjectURL: () => {}
+      revokeObjectURL: () => {
+        // Intentionally empty - mock implementation
+      },
     };
   }
 

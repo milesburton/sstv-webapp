@@ -71,7 +71,7 @@ describe('SSTV Integration Tests', () => {
         { r: 0, g: 0, b: 255, name: 'Pure Blue', chromaTest: 'high-Cb' },
       ];
 
-      testColors.forEach(({ r, g, b, name }) => {
+      testColors.forEach(({ r, g, b }) => {
         const samples = [];
         const pixelData = new Uint8ClampedArray([r, g, b, 255, r, g, b, 255]);
 

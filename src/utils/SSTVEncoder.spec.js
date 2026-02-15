@@ -162,7 +162,7 @@ describe('SSTVEncoder', () => {
         { r: 128, g: 128, b: 128, name: 'Gray' }, // Cb=128, Cr=128
       ];
 
-      testColors.forEach(({ r, g, b, name }) => {
+      testColors.forEach(({ r, g, b }) => {
         const samples = [];
         const pixelData = new Uint8ClampedArray([r, g, b, 255, r, g, b, 255]);
 
