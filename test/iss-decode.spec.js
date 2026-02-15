@@ -54,7 +54,7 @@ beforeAll(async () => {
 describe('ISS SSTV Decode Test', () => {
   it('should decode ISS SSTV transmission without excessive green tint', async () => {
     // Load the ISS SSTV file
-    const wavBuffer = readFileSync('/tmp/iss-sstv.wav');
+    const wavBuffer = readFileSync('test/fixtures/pd120_iss_2020.wav');
     const blob = {
       arrayBuffer: () =>
         Promise.resolve(
