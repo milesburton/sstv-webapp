@@ -518,8 +518,12 @@ export class SSTVDecoder {
           // YUV to RGB conversion (ITU-R BT.601 video range)
           // Based on smolgroot/sstv-decoder proven implementation
           const yAdj = Y - 16;
-          const uAdj = U - 128;
-          const vAdj = V - 128;
+
+          // Apply chroma saturation reduction for noisy real-world signals
+          // Only reduce saturation for signals with auto-calibration enabled (ISS)
+          const saturationFactor = this.autoCalibrate ? 0.85 : 1.0;
+          const uAdj = (U - 128) * saturationFactor;
+          const vAdj = (V - 128) * saturationFactor;
 
           let R = ((298 * yAdj + 409 * vAdj + 128) >> 8);
           let G = ((298 * yAdj - 100 * uAdj - 208 * vAdj + 128) >> 8);
