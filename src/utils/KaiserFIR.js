@@ -57,7 +57,7 @@ export class KaiserFIR {
    */
   kaiser(n, N, beta) {
     const alpha = (N - 1) / 2;
-    const arg = beta * Math.sqrt(1 - Math.pow((n - alpha) / alpha, 2));
+    const arg = beta * Math.sqrt(1 - ((n - alpha) / alpha) ** 2);
     return this.besselI0(arg) / this.besselI0(beta);
   }
 

@@ -36,9 +36,10 @@ describe('FM Demodulation Integration', () => {
     expect(demodulated.length).toBe(samples.length);
 
     // Check sync detection region (should be very negative)
+    // Note: FM demod clamps to ±1 to handle noisy signals
     const syncRegion = demodulated.slice(200, 400);
     const syncAvg = syncRegion.reduce((a, b) => a + b, 0) / syncRegion.length;
-    expect(syncAvg).toBeLessThan(-1.5); // Sync at 1200 Hz is -700 Hz from center
+    expect(syncAvg).toBeLessThan(-0.9); // Sync at 1200 Hz is -700 Hz from center (clamped to -1)
 
     // Check data region (should show sweep from -1 to +1)
     const dataStart = demodulated.slice(600, 800);
@@ -141,7 +142,7 @@ describe('FM Demodulation Integration', () => {
       for (let i = start; i < end; i++) {
         avg += output[i];
       }
-      avg /= (end - start);
+      avg /= end - start;
 
       // Expected: (2100 - 1900) / 400 = 0.5
       expect(avg).toBeGreaterThan(0.4);

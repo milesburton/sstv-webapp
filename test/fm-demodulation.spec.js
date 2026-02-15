@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Complex } from '../src/utils/Complex.js';
-import { Phasor } from '../src/utils/Phasor.js';
-import { KaiserFIR } from '../src/utils/KaiserFIR.js';
 import { FMDemodulator } from '../src/utils/FMDemodulator.js';
+import { KaiserFIR } from '../src/utils/KaiserFIR.js';
+import { Phasor } from '../src/utils/Phasor.js';
 
 describe('FM Demodulation Components', () => {
   describe('Complex', () => {

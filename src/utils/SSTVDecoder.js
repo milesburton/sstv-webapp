@@ -1,7 +1,7 @@
 // SSTV Decoder - Converts SSTV audio signals to images
 
-import { SSTV_MODES } from './SSTVEncoder.js';
 import { FMDemodulator } from './FMDemodulator.js';
+import { SSTV_MODES } from './SSTVEncoder.js';
 
 const FREQ_SYNC = 1200;
 const FREQ_BLACK = 1500;
@@ -17,7 +17,8 @@ export class SSTVDecoder {
     this.freqOffset = options.freqOffset || 0;
     this.autoCalibrate = options.autoCalibrate !== false; // Default true
     // Use FM demodulation for better ISS signal handling
-    this.useFMDemod = options.useFMDemod !== false; // Default true
+    // TEMPORARILY DISABLED - investigating issues
+    this.useFMDemod = options.useFMDemod === true; // Default false for now
   }
 
   async decodeAudio(audioFile) {
@@ -59,10 +60,6 @@ export class SSTVDecoder {
   decodeImageWithFM(samples) {
     // Create FM demodulator
     const fmDemod = new FMDemodulator(FREQ_CENTER, FREQ_BANDWIDTH, this.sampleRate);
-
-    if (typeof window !== 'undefined') {
-      console.log('🔊 Using FM demodulation for improved ISS signal handling');
-    }
 
     // Demodulate entire signal
     const demodulated = fmDemod.demodulateAll(samples);
@@ -114,33 +111,15 @@ export class SSTVDecoder {
 
       if (this.mode.colorFormat === 'RGB') {
         // Decode RGB channels (not commonly used for Robot36)
-        position = this.decodeScanLineFromFreqStream(
-          freqStream,
-          position,
-          imageData,
-          y,
-          1
-        );
+        position = this.decodeScanLineFromFreqStream(freqStream, position, imageData, y, 1);
         if (this.mode.separatorPulse) {
           position += Math.floor(this.mode.separatorPulse * this.sampleRate);
         }
-        position = this.decodeScanLineFromFreqStream(
-          freqStream,
-          position,
-          imageData,
-          y,
-          2
-        );
+        position = this.decodeScanLineFromFreqStream(freqStream, position, imageData, y, 2);
         if (this.mode.separatorPulse) {
           position += Math.floor(this.mode.separatorPulse * this.sampleRate);
         }
-        position = this.decodeScanLineFromFreqStream(
-          freqStream,
-          position,
-          imageData,
-          y,
-          0
-        );
+        position = this.decodeScanLineFromFreqStream(freqStream, position, imageData, y, 0);
       } else {
         // YUV mode (Robot36)
         // Decode Y (luminance)
@@ -799,7 +778,10 @@ export class SSTVDecoder {
   findSyncPulseInFreqStream(freqStream, startPos, endPos = freqStream.length) {
     const syncDuration = Math.max(0.004, this.mode?.syncPulse || 0.005);
     const samplesPerCheck = Math.floor(this.sampleRate * 0.0002);
-    const searchEnd = Math.min(endPos, freqStream.length - Math.floor(syncDuration * this.sampleRate));
+    const searchEnd = Math.min(
+      endPos,
+      freqStream.length - Math.floor(syncDuration * this.sampleRate)
+    );
 
     // Schmitt trigger for robust sync detection
     const syncEnterThreshold = 0.5; // Normalized frequency threshold

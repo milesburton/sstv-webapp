@@ -1,6 +1,6 @@
 import { Complex } from './Complex.js';
-import { Phasor } from './Phasor.js';
 import { KaiserFIR } from './KaiserFIR.js';
+import { Phasor } from './Phasor.js';
 
 /**
  * FM Demodulator using phase-difference method
@@ -31,10 +31,15 @@ export class FMDemodulator {
     this.prevPhase = 0;
 
     // Scale factor: converts phase difference to normalized frequency
-    // Phase difference per sample for a signal at frequency f:
-    // Δφ = 2π * f / sampleRate
-    // We want output of ±1 for ±bandwidth/2
-    // So scale = 1 / (2π * (bandwidth/2) / sampleRate) = sampleRate / (π * bandwidth)
+    // Phase difference per sample for a frequency deviation Δf from center:
+    // Δφ = 2π * Δf / sampleRate
+    // We want output of ±1 for Δf = ±bandwidth/2 (e.g., ±400 Hz for 800 Hz BW)
+    // At Δf = bandwidth/2: Δφ = 2π * (bandwidth/2) / sampleRate
+    // To normalize: scale = 1 / Δφ = sampleRate / (2π * bandwidth/2) = sampleRate / (π * bandwidth)
+    // But this gives huge values, so we need: 1 / (Δφ_max) where Δφ_max = 2π*(BW/2)/SR
+    // Simpler: to map Δf to [-1, +1], use: output = Δf / (bandwidth/2)
+    // Since Δφ = 2π*Δf/SR, then Δf = Δφ*SR/(2π)
+    // So: output = (Δφ*SR/(2π)) / (bandwidth/2) = Δφ * SR / (π * bandwidth)
     this.scale = sampleRate / (Math.PI * bandwidth);
   }
 
@@ -64,8 +69,13 @@ export class FMDemodulator {
     this.prevPhase = phase;
 
     // 4. Scale phase difference to frequency
-    // Output range: approximately -1 to +1 for ±bandwidth/2
-    return this.scale * delta;
+    // Output range: -1 to +1 for ±bandwidth/2
+    let normalized = this.scale * delta;
+
+    // Clamp to expected range to handle noisy signals
+    normalized = Math.max(-1, Math.min(1, normalized));
+
+    return normalized;
   }
 
   /**
