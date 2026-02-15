@@ -96,6 +96,7 @@
     }
   },
   "javascript": {
+    "globals": ["__APP_VERSION__"],
     "formatter": {
       "jsxQuoteStyle": "double",
       "quoteProperties": "asNeeded",

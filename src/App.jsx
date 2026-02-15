@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import './App.css';
-import packageJson from '../package.json';
 import { SSTVDecoder } from './utils/SSTVDecoder';
 import { SSTV_MODES, SSTVEncoder } from './utils/SSTVEncoder';
 
@@ -353,7 +352,7 @@ function App() {
             View on GitHub
           </a>
           {' • '}
-          <span className="version">v{packageJson.version}</span>
+          <span className="version">v{__APP_VERSION__}</span>
           {' • '}
           <span className="build-info">
             Build {new Date().toISOString().slice(0, 16).replace('T', ' ')}
