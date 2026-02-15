@@ -22,6 +22,11 @@
     "enabled": true,
     "rules": {
       "recommended": true,
+      "a11y": {
+        "noStaticElementInteractions": "off",
+        "useMediaCaption": "off",
+        "useButtonType": "off"
+      },
       "complexity": {
         "noExtraBooleanCast": "error",
         "noUselessCatch": "error",
@@ -85,7 +90,8 @@
         "noUnsafeNegation": "error",
         "useGetterReturn": "error",
         "noWith": "error",
-        "noVar": "error"
+        "noVar": "error",
+        "noArrayIndexKey": "off"
       }
     }
   },

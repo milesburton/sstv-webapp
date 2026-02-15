@@ -1,1 +1,11 @@
-npm run biome:check && npm run spec:run
+# Run linting
+npm run biome:check || exit 1
+
+# Run all tests
+npm run spec:run || exit 1
+
+# Auto-bump patch version on commit
+npm version patch --no-git-tag-version || exit 1
+
+# Stage the updated package.json
+git add package.json
