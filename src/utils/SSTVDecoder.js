@@ -374,18 +374,22 @@ export class SSTVDecoder {
     const windowDuration = 0.003; // 3ms window
     const windowSamples = Math.floor(windowDuration * this.sampleRate);
 
-    for (let x = 0; x < halfWidth; x++) {
-      const pixelPos = startPos + x * samplesPerPixel;
+    // Advance startPos to ensure we're reading actual chroma data
+    // Try advancing by a full window to be safe
+    const chromaStart = startPos + windowSamples;
 
-      // Center the window on the MIDDLE of the pixel, not the start
-      const pixelCenter = pixelPos + Math.floor(samplesPerPixel / 2);
-      const windowStart = Math.max(0, Math.floor(pixelCenter - windowSamples / 2));
+    for (let x = 0; x < halfWidth; x++) {
+      const pixelPos = chromaStart + x * samplesPerPixel;
+
+      // Use window starting at pixel position (not centered backward)
+      // This prevents reading into the previous porch/separator
+      const windowStart = pixelPos;
       const windowEnd = windowStart + windowSamples;
 
       // Make sure we have enough samples for the window
       if (windowEnd >= samples.length) break;
 
-      // Detect frequency at this pixel position (using centered window)
+      // Detect frequency at this pixel position
       const freq = this.detectFrequencyRange(samples, windowStart, windowDuration);
 
       // Map frequency to component value (video range: 16-240)
@@ -394,6 +398,11 @@ export class SSTVDecoder {
       value = Math.max(16, Math.min(240, Math.round(value)));
 
       const chromaValue = value;
+
+      // Debug: log first few chroma values with detailed position info
+      if (y === 1 && x < 3) {
+        console.log(`  x=${x}: pixelPos=${pixelPos}, windowStart=${windowStart}, freq=${freq.toFixed(0)}Hz → ${componentType}=${chromaValue}`);
+      }
 
       // Store chrominance for two pixels (expanding from half resolution)
       const idx1 = y * this.mode.width + x * 2;
@@ -431,8 +440,21 @@ export class SSTVDecoder {
         const evenChromaIdx = evenLine * this.mode.width + x;
         const oddChromaIdx = oddLine * this.mode.width + x;
 
-        const V = chromaV[evenChromaIdx] || 128; // V from even line (default to neutral 128, not 0!)
-        const U = chromaU[oddChromaIdx] || 128; // U from odd line (default to neutral 128, not 0!)
+        const V = chromaV[evenChromaIdx] || 128; // V from even line
+        const U = chromaU[oddChromaIdx] || 128; // U from odd line
+
+        // Debug: collect U/V statistics for first line pair
+        if (y === 0 && x < 320) {
+          if (!this.debugUVStats) {
+            this.debugUVStats = { uSum: 0, vSum: 0, count: 0 };
+          }
+          this.debugUVStats.uSum += U;
+          this.debugUVStats.vSum += V;
+          this.debugUVStats.count++;
+          if (x === 319) {
+            console.log(`\nFirst line pair avg: U=${(this.debugUVStats.uSum / this.debugUVStats.count).toFixed(1)}, V=${(this.debugUVStats.vSum / this.debugUVStats.count).toFixed(1)}`);
+          }
+        }
 
         // Apply to both lines in the pair
         for (let ly = evenLine; ly <= oddLine && ly < this.mode.lines; ly++) {

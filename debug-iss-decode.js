@@ -50,7 +50,10 @@ const wavBuffer = readFileSync('/tmp/iss-sstv.wav');
 
 // Create a Blob-like object
 const blob = {
-  arrayBuffer: () => Promise.resolve(wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength))
+  arrayBuffer: () =>
+    Promise.resolve(
+      wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength)
+    ),
 };
 
 // Decode

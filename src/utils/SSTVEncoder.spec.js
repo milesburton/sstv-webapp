@@ -101,8 +101,14 @@ describe('SSTVEncoder', () => {
 
       // Create test pixel data: pure black (0,0,0) and pure white (255,255,255)
       const testData = new Uint8ClampedArray([
-        0, 0, 0, 255,      // Black pixel
-        255, 255, 255, 255 // White pixel
+        0,
+        0,
+        0,
+        255, // Black pixel
+        255,
+        255,
+        255,
+        255, // White pixel
       ]);
 
       // Encode Y values
@@ -120,19 +126,13 @@ describe('SSTVEncoder', () => {
       const samples = [];
 
       // Pure red: high Cr, low Cb
-      const redData = new Uint8ClampedArray([
-        255, 0, 0, 255,
-        255, 0, 0, 255
-      ]);
+      const redData = new Uint8ClampedArray([255, 0, 0, 255, 255, 0, 0, 255]);
 
       encoder.addScanLineYUV(samples, redData, 2, 0);
       expect(samples.length).toBeGreaterThan(0);
 
       // Pure blue: low Cr, high Cb
-      const blueData = new Uint8ClampedArray([
-        0, 0, 255, 255,
-        0, 0, 255, 255
-      ]);
+      const blueData = new Uint8ClampedArray([0, 0, 255, 255, 0, 0, 255, 255]);
 
       samples.length = 0;
       encoder.addScanLineYUV(samples, blueData, 2, 1);
@@ -143,10 +143,7 @@ describe('SSTVEncoder', () => {
       const samples = [];
 
       // Neutral gray should encode to Cb=128, Cr=128 (center of video range)
-      const grayData = new Uint8ClampedArray([
-        128, 128, 128, 255,
-        128, 128, 128, 255
-      ]);
+      const grayData = new Uint8ClampedArray([128, 128, 128, 255, 128, 128, 128, 255]);
 
       encoder.addScanLineYUV(samples, grayData, 2, 0);
 
@@ -157,12 +154,12 @@ describe('SSTVEncoder', () => {
     it('should maintain range consistency across color space conversion', () => {
       // Test critical RGB values that have caused issues
       const testColors = [
-        { r: 0, g: 0, b: 0, name: 'Black' },       // Y=16, Cb=128, Cr=128
+        { r: 0, g: 0, b: 0, name: 'Black' }, // Y=16, Cb=128, Cr=128
         { r: 255, g: 255, b: 255, name: 'White' }, // Y=235, Cb=128, Cr=128
-        { r: 255, g: 0, b: 0, name: 'Red' },       // High Cr
-        { r: 0, g: 255, b: 0, name: 'Green' },     // Low Cr, low Cb
-        { r: 0, g: 0, b: 255, name: 'Blue' },      // High Cb
-        { r: 128, g: 128, b: 128, name: 'Gray' },  // Cb=128, Cr=128
+        { r: 255, g: 0, b: 0, name: 'Red' }, // High Cr
+        { r: 0, g: 255, b: 0, name: 'Green' }, // Low Cr, low Cb
+        { r: 0, g: 0, b: 255, name: 'Blue' }, // High Cb
+        { r: 128, g: 128, b: 128, name: 'Gray' }, // Cb=128, Cr=128
       ];
 
       testColors.forEach(({ r, g, b, name }) => {

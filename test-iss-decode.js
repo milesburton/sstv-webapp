@@ -46,7 +46,10 @@ console.log('🔍 Testing ISS SSTV decode...\n');
 // Read the ISS SSTV file
 const wavBuffer = readFileSync('/tmp/iss-sstv.wav');
 const blob = {
-  arrayBuffer: () => Promise.resolve(wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength))
+  arrayBuffer: () =>
+    Promise.resolve(
+      wavBuffer.buffer.slice(wavBuffer.byteOffset, wavBuffer.byteOffset + wavBuffer.byteLength)
+    ),
 };
 
 // Decode
@@ -97,8 +100,8 @@ for (let i = 0; i < pixels.length; i += 4) {
 }
 
 const totalPixels = pixels.length / 4;
-const greenPercent = (greenCount / totalPixels * 100).toFixed(1);
-const colorfulPercent = (colorfulCount / totalPixels * 100).toFixed(1);
+const greenPercent = ((greenCount / totalPixels) * 100).toFixed(1);
+const colorfulPercent = ((colorfulCount / totalPixels) * 100).toFixed(1);
 
 console.log(`\n📊 Image Analysis:`);
 console.log(`   Green-tinted pixels: ${greenPercent}% (should be low)`);
